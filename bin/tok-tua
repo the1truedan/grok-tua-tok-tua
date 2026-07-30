@@ -1,0 +1,397 @@
+#!/usr/bin/env bash
+# tok-tua — Token Textual User Agent: multi-CLI + Headroom metrics (tmux).
+#
+# Default model: manager-auto (Headroom → orchestrator, preferred GPU host).
+# Default CLI: codex (override with --cli / TOK_TUA_CLI).
+#
+# Usage:
+#   bin/tok-tua                         # codex + dashboard
+#   bin/tok-tua --cli pi --model manager-code
+#   bin/tok-tua --cli openrouter-wrap   # free cloud façade (public only)
+#   bin/tok-tua --cli cursor
+#   bin/tok-tua --cli grok              # SuperGrok (or use grok-tua)
+#   bin/tok-tua --scale turnstone       # open Turnstone + metrics
+#   bin/tok-tua --scale herdr --cli codex
+#   bin/tok-tua --qqq 0|1|3              # QQQ mode: local/paid-cloud/free-cloud (see config/qqq_orchestration.json)
+#   bin/tok-tua stack | providers | spawn | attach | dashboard
+#   bin/tok-tua --fresh
+#
+# Layout (scale=single): left CLI (~72%), right metrics (~28%).
+# Quit either pane → whole session ends.
+
+set -euo pipefail
+
+_src="${BASH_SOURCE[0]}"
+while [[ -L "${_src}" ]]; do
+  _dir="$(cd -P "$(dirname "${_src}")" && pwd)"
+  _src="$(readlink "${_src}")"
+  [[ "${_src}" != /* ]] && _src="${_dir}/${_src}"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "${_src}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SESSION_NAME="${TOK_TUA_SESSION:-tok-tua}"
+STATS_PCT="${TOK_TUA_STATS_PCT:-28}"
+CLI="${TOK_TUA_CLI:-}"
+MODEL="${TOK_TUA_MODEL:-}"
+SCALE="${TOK_TUA_SCALE:-single}"
+QQQ="${TOK_TUA_QQQ:-}"
+ALSO=""
+FORCE_FRESH=0
+MODE="launch"
+
+if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
+  PYTHON="${REPO_ROOT}/.venv/bin/python"
+else
+  PYTHON="$(command -v python3 || true)"
+fi
+if [[ -z "${PYTHON}" ]]; then
+  echo "tok-tua: python3 not found" >&2
+  exit 1
+fi
+export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+
+# Local gateway defaults (a local Headroom/LiteLLM compose stack on 127.0.0.1).
+export HEADROOM_BASE="${HEADROOM_BASE:-http://127.0.0.1:8787}"
+export LITELLM_BASE="${LITELLM_BASE:-http://127.0.0.1:4000}"
+export TURNSTONE_BASE="${TURNSTONE_BASE:-http://127.0.0.1:8090}"
+
+# Load this repo's own .env (copy .env.example -> .env and fill in your
+# values). Replaces the old hardcoded ~/ai-gateway/.env sibling-repo lookup.
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  # shellcheck disable=SC1091
+  set -a && source "${REPO_ROOT}/.env" && set +a
+elif [[ ! -f "${REPO_ROOT}/.env.example" ]]; then
+  echo "tok-tua: warning: no .env found in ${REPO_ROOT} (see .env.example)" >&2
+fi
+
+# Optional LAN fallback gateway (e.g. a second machine on your network running
+# Headroom). Set NAS_HOST_IP in .env to enable this; skipped otherwise.
+if [[ -n "${NAS_HOST_IP:-}" ]] && ! curl -sf --max-time 1 "${HEADROOM_BASE}/readyz" >/dev/null 2>&1 && ! curl -sf --max-time 1 "${HEADROOM_BASE}/v1/models" >/dev/null 2>&1; then
+  if curl -sf --max-time 1 "http://${NAS_HOST_IP}:8787/readyz" >/dev/null 2>&1; then
+    export HEADROOM_BASE="http://${NAS_HOST_IP}:8787"
+    export LITELLM_BASE="${LITELLM_BASE_FALLBACK:-http://${NAS_HOST_IP}:4000}"
+  fi
+fi
+
+usage() {
+  sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+# Parse args
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help|help)
+      usage
+      exit 0
+      ;;
+    --fresh|fresh)
+      FORCE_FRESH=1
+      shift
+      ;;
+    --cli)
+      CLI="${2:-}"; shift 2
+      ;;
+    --model)
+      MODEL="${2:-}"; shift 2
+      ;;
+    --scale)
+      SCALE="${2:-}"; shift 2
+      ;;
+    --qqq)
+      QQQ="${2:-}"; shift 2
+      ;;
+    --also)
+      ALSO="${2:-}"; shift 2
+      ;;
+    attach|stack|check|dashboard|dash|watch|providers|spawn)
+      MODE="$1"
+      shift
+      ;;
+    --)
+      shift
+      break
+      ;;
+    *)
+      # allow: tok-tua codex  as shorthand for --cli codex
+      if [[ -z "${CLI}" && "$1" != -* ]]; then
+        CLI="$1"
+        shift
+      else
+        echo "tok-tua: unknown arg: $1" >&2
+        usage >&2
+        exit 1
+      fi
+      ;;
+  esac
+done
+
+CLI="${CLI:-${TOK_TUA_CLI:-codex}}"
+MODEL="${MODEL:-${TOK_TUA_MODEL:-manager-auto}}"
+SCALE="${SCALE:-single}"
+QQQ="${QQQ:-${TOK_TUA_QQQ:-}}"
+export TOK_TUA_CLI="${CLI}"
+export TOK_TUA_MODEL="${MODEL}"
+export TOK_TUA_SCALE="${SCALE}"
+export TOK_TUA_QQQ="${QQQ}"
+
+DASH_CMD="env HEADROOM_BASE=${HEADROOM_BASE} LITELLM_BASE=${LITELLM_BASE} TURNSTONE_BASE=${TURNSTONE_BASE} TOK_TUA_CLI=${CLI} TOK_TUA_MODEL=${MODEL} TOK_TUA_QQQ=${QQQ} PYTHONPATH=${PYTHONPATH} ${PYTHON} -m tok_tua.dashboard"
+STACK_CMD="env HEADROOM_BASE=${HEADROOM_BASE} LITELLM_BASE=${LITELLM_BASE} TURNSTONE_BASE=${TURNSTONE_BASE} PYTHONPATH=${PYTHONPATH} ${PYTHON} -m tok_tua stack"
+
+case "${MODE}" in
+  attach)
+    if tmux has-session -t "${SESSION_NAME}" 2>/dev/null; then
+      exec tmux attach -t "${SESSION_NAME}"
+    fi
+    echo "tok-tua: no session '${SESSION_NAME}'" >&2
+    exit 1
+    ;;
+  stack|check)
+    exec bash -c "cd '${REPO_ROOT}' && ${STACK_CMD}"
+    ;;
+  providers)
+    exec bash -c "cd '${REPO_ROOT}' && ${PYTHON} -m tok_tua providers"
+    ;;
+  spawn)
+    # remaining args: optional --cli already set; dry-run unless --apply in env
+    exec bash -c "cd '${REPO_ROOT}' && ${PYTHON} -m tok_tua spawn --cli '${CLI}' --model '${MODEL}' --cwd '${REPO_ROOT}' --dry-run"
+    ;;
+  dashboard|dash|watch)
+    exec bash -c "cd '${REPO_ROOT}' && ${DASH_CMD}"
+    ;;
+  launch)
+    :
+    ;;
+esac
+
+# Resolve launch plan via Python (JSON)
+_resolve_err="$(mktemp -t tok-tua-resolve-err)"
+PLAN_JSON="$(
+  cd "${REPO_ROOT}" && TOK_TUA_CLI="${CLI}" TOK_TUA_MODEL="${MODEL}" TOK_TUA_QQQ="${QQQ}" \
+    ${PYTHON} -m tok_tua resolve --cli "${CLI}" --model "${MODEL}" --qqq "${QQQ}" 2>"${_resolve_err}" || true
+)"
+if [[ -z "${PLAN_JSON}" ]]; then
+  echo "tok-tua: failed to resolve plan for cli=${CLI} model=${MODEL} qqq=${QQQ:-QQQ0}" >&2
+  tail -5 "${_resolve_err}" >&2 2>/dev/null || true
+  rm -f "${_resolve_err}"
+  ${PYTHON} -m tok_tua providers >&2 || true
+  exit 1
+fi
+rm -f "${_resolve_err}"
+
+SHORT_CMD="$(
+  ${PYTHON} -c 'import json,sys; p=json.load(sys.stdin); print(p.get("short_command") or "")' <<<"${PLAN_JSON}"
+)"
+KIND="$(
+  ${PYTHON} -c 'import json,sys; p=json.load(sys.stdin); print(p.get("kind") or "cli")' <<<"${PLAN_JSON}"
+)"
+CLOUD="$(
+  ${PYTHON} -c 'import json,sys; p=json.load(sys.stdin); print("1" if p.get("cloud") else "0")' <<<"${PLAN_JSON}"
+)"
+URL="$(
+  ${PYTHON} -c 'import json,sys; p=json.load(sys.stdin); print(p.get("url") or "")' <<<"${PLAN_JSON}"
+)"
+
+# Launch metrics banner
+echo "────────────────────────────────────────────────────────────"
+${PYTHON} -m tok_tua.dashboard --check --cli "${CLI}" --model "${MODEL}" --qqq "${QQQ}" 2>/dev/null | head -40 || \
+  ${PYTHON} -m tok_tua stack
+echo "────────────────────────────────────────────────────────────"
+echo "[tok-tua] scale=${SCALE} cli=${CLI} model=${MODEL} qqq=${QQQ:-QQQ0} kind=${KIND} short=${SHORT_CMD}"
+if [[ "${CLOUD}" == "1" ]]; then
+  echo "[tok-tua] WARN: cloud route — public code only; no PHI" >&2
+fi
+
+# scale=turnstone: open UI + optional metrics pane only
+if [[ "${SCALE}" == "turnstone" || "${KIND}" == "url" ]]; then
+  OPEN_URL="${URL:-${TURNSTONE_BASE}}"
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    open "${OPEN_URL}" 2>/dev/null || true
+  fi
+  echo "[tok-tua] Turnstone: ${OPEN_URL}  (API: python -m tok_tua turnstone health)"
+fi
+
+# scale=herdr: start agent via Python spawn (live, not dry-run)
+if [[ "${SCALE}" == "herdr" ]]; then
+  echo "[tok-tua] herdr scale: starting agent pane…"
+  ${PYTHON} -m tok_tua spawn --cli "${CLI}" --model "${MODEL}" --name "tok-${CLI}" --cwd "${REPO_ROOT}" || true
+  if [[ -n "${ALSO}" ]]; then
+    ${PYTHON} -m tok_tua spawn --cli "${ALSO}" --model "${MODEL}" --name "tok-${ALSO}" --cwd "${REPO_ROOT}" || true
+  fi
+  if command -v herdr >/dev/null 2>&1; then
+    echo "[tok-tua] attaching herdr (metrics: ${PYTHON} -m tok_tua.dashboard --check)"
+    exec herdr
+  fi
+  echo "tok-tua: herdr not on PATH; falling back to single tmux" >&2
+  SCALE="single"
+fi
+
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "tok-tua: tmux is required (brew install tmux)" >&2
+  exit 1
+fi
+
+# SuperGrok: optional handoff to full grok-tua when requested
+if [[ "${CLI}" == "grok" && -x "${REPO_ROOT}/bin/grok-tua" && "${TOK_TUA_GROK_HANDOFF:-1}" == "1" ]]; then
+  echo "[tok-tua] handoff to grok-tua for SuperGrok metrics (TOK_TUA_GROK_HANDOFF=0 to disable)"
+  exec bash "${REPO_ROOT}/bin/grok-tua" ${FORCE_FRESH:+--fresh}
+fi
+
+# Prefer absolute CLI path so panes never pick wrong PATH peers
+CLI_BIN=""
+if [[ -n "${SHORT_CMD}" ]]; then
+  _first="${SHORT_CMD%% *}"
+  if [[ "${_first}" == /* ]]; then
+    CLI_BIN="${_first}"
+  else
+    CLI_BIN="$(command -v "${_first}" 2>/dev/null || true)"
+  fi
+  if [[ -n "${CLI_BIN}" && "${_first}" != /* ]]; then
+    SHORT_CMD="${CLI_BIN}${SHORT_CMD#"${_first}"}"
+  fi
+fi
+
+# Pane env: Headroom first; ~/.local/bin before system
+PATH_PREPEND='export PATH="$HOME/.local/bin:$HOME/.opencode/bin:/usr/local/bin:$PATH"'
+# If sharkdp fd is only fdfind, expose as fd (pi probes `fd --version`)
+if ! command -v fd >/dev/null 2>&1 && command -v fdfind >/dev/null 2>&1; then
+  mkdir -p "${HOME}/.local/bin"
+  ln -sfn "$(command -v fdfind)" "${HOME}/.local/bin/fd"
+fi
+
+if [[ -z "${LITELLM_MASTER_KEY:-}" && -z "${OPENAI_API_KEY:-}" ]]; then
+  echo "tok-tua: warning: LITELLM_MASTER_KEY / OPENAI_API_KEY not set — CLI pane may fail to authenticate against Headroom. Configure one in ${REPO_ROOT}/.env (see .env.example)." >&2
+fi
+
+LEFT_CMD="${PATH_PREPEND}; set -a; [ -f '${REPO_ROOT}/.env' ] && . '${REPO_ROOT}/.env'; set +a; export OPENAI_BASE_URL=${HEADROOM_BASE}/v1 OPENAI_API_BASE=${HEADROOM_BASE}/v1 OPENAI_API_KEY=\"\${LITELLM_MASTER_KEY:-\$OPENAI_API_KEY}\" HEADROOM_BASE=${HEADROOM_BASE} LITELLM_BASE=${LITELLM_BASE} PYTHONPATH=${PYTHONPATH}; cd '${REPO_ROOT}' && ${SHORT_CMD}"
+
+if ${PYTHON} -c "import textual" 2>/dev/null; then
+  RIGHT_CMD="${PATH_PREPEND}; cd '${REPO_ROOT}' && ${DASH_CMD}"
+else
+  echo "[tok-tua] textual not installed — stats pane uses --check loop (uv pip install textual)" >&2
+  RIGHT_CMD="${PATH_PREPEND}; cd '${REPO_ROOT}' && while true; do clear; ${DASH_CMD} --check 2>/dev/null || ${STACK_CMD}; sleep 15; done"
+fi
+
+_session_looks_healthy() {
+  local pane_count dead titles cmds
+  pane_count="$(tmux list-panes -t "${SESSION_NAME}" 2>/dev/null | wc -l | tr -d ' ')"
+  [[ "${pane_count}" == "2" ]] || return 1
+  dead="$(tmux list-panes -t "${SESSION_NAME}" -F '#{pane_dead}' 2>/dev/null | tr -d '\n')"
+  [[ "${dead}" == "00" ]] || return 1
+  titles="$(tmux list-panes -t "${SESSION_NAME}" -F '#{pane_title}' 2>/dev/null | tr '\n' ' ')"
+  # CLIs often rewrite pane title (pi → "π - grokcode"); accept stats + coding/cli title
+  if echo "${titles}" | grep -q 'stats'; then
+    if echo "${titles}" | grep -qE 'coding|π|pi|codex|omp|opencode|aider|tau|grok'; then
+      return 0
+    fi
+  fi
+  cmds="$(tmux list-panes -t "${SESSION_NAME}" -F '#{pane_current_command}' 2>/dev/null | tr '\n' ' ')"
+  if echo "${cmds}" | grep -qiE 'pi|node|codex|python|omp|opencode'; then
+    return 0
+  fi
+  return 1
+}
+
+if [[ "${FORCE_FRESH}" == "1" || "${TOK_TUA_FRESH:-0}" == "1" ]]; then
+  tmux kill-session -t "${SESSION_NAME}" 2>/dev/null || true
+fi
+
+# Seed size for detached create/split only; after attach we track the client (no dotted fill).
+_seed_cols="${COLUMNS:-}"
+_seed_rows="${LINES:-}"
+if [[ -z "${_seed_cols}" || "${_seed_cols}" -lt 80 ]]; then
+  _seed_cols="$(tput cols 2>/dev/null || echo 280)"
+fi
+if [[ -z "${_seed_rows}" || "${_seed_rows}" -lt 20 ]]; then
+  _seed_rows="$(tput lines 2>/dev/null || echo 60)"
+fi
+# Prefer a generous seed when env is empty/small so splits never hit "size missing"
+[[ "${_seed_cols}" -lt 240 ]] && _seed_cols=280
+[[ "${_seed_rows}" -lt 40 ]] && _seed_rows=60
+TMUX_COLS="${TOK_TUA_COLS:-${_seed_cols}}"
+TMUX_ROWS="${TOK_TUA_ROWS:-${_seed_rows}}"
+
+# Always re-apply window-size latest: resize-window forces manual and locks later
+# client resizes (classic dotted strip when window < client).
+_set_window_size_latest() {
+  tmux set-window-option -t "${SESSION_NAME}:main" window-size latest 2>/dev/null \
+    || tmux set-option -t "${SESSION_NAME}" window-size latest 2>/dev/null || true
+}
+
+# Grow window to current TTY (or keep seed). Leaves window-size=latest so drag-resize follows.
+_fit_window_to_client() {
+  local cols rows
+  tmux set-option -t "${SESSION_NAME}" aggressive-resize on 2>/dev/null || true
+  _set_window_size_latest
+  if [[ -t 1 ]]; then
+    cols="$(tput cols 2>/dev/null || echo 0)"
+    rows="$(tput lines 2>/dev/null || echo 0)"
+    if [[ "${cols}" -ge 40 && "${rows}" -ge 12 ]]; then
+      tmux resize-window -t "${SESSION_NAME}:main" -x "${cols}" -y "${rows}" 2>/dev/null || true
+      # resize-window sets window-size=manual — restore latest so later resizes work
+      _set_window_size_latest
+      return 0
+    fi
+  fi
+  # Detached / no TTY: unlock from manual size if a client is already attached
+  tmux resize-window -t "${SESSION_NAME}:main" -A 2>/dev/null || true
+  _set_window_size_latest
+}
+
+_attach_session() {
+  _fit_window_to_client
+  if [[ -t 0 && -t 1 && "${TOK_TUA_NO_ATTACH:-0}" != "1" ]]; then
+    exec tmux attach -t "${SESSION_NAME}"
+  fi
+  echo "[tok-tua] session ready (no TTY attach). Attach: tmux attach -t ${SESSION_NAME}"
+  exit 0
+}
+
+if tmux has-session -t "${SESSION_NAME}" 2>/dev/null; then
+  if _session_looks_healthy; then
+    echo "Attaching to existing session '${SESSION_NAME}' (tok-tua --fresh to recreate)"
+    _attach_session
+  fi
+  echo "[tok-tua] Session '${SESSION_NAME}' looks stale/broken — recreating"
+  tmux kill-session -t "${SESSION_NAME}" 2>/dev/null || true
+fi
+
+tmux new-session -d -s "${SESSION_NAME}" -x "${TMUX_COLS}" -y "${TMUX_ROWS}" -c "${REPO_ROOT}" -n main \
+  "bash -c $(printf '%q' "${LEFT_CMD}")"
+# Force window size before split (detached SSH often has no client size → "size missing")
+tmux resize-window -t "${SESSION_NAME}:main" -x "${TMUX_COLS}" -y "${TMUX_ROWS}" 2>/dev/null || true
+# tmux 3.x: prefer -l N% over deprecated -p for horizontal stats strip
+if ! tmux split-window -h -t "${SESSION_NAME}:main" -c "${REPO_ROOT}" -l "${STATS_PCT}%" \
+  "bash -c $(printf '%q' "${RIGHT_CMD}")" 2>/dev/null; then
+  # Fallback: fixed columns on the right
+  RIGHT_COLS=$(( TMUX_COLS * STATS_PCT / 100 ))
+  [[ "${RIGHT_COLS}" -lt 40 ]] && RIGHT_COLS=40
+  tmux split-window -h -t "${SESSION_NAME}:main" -c "${REPO_ROOT}" -l "${RIGHT_COLS}" \
+    "bash -c $(printf '%q' "${RIGHT_CMD}")"
+fi
+
+tmux select-pane -t "${SESSION_NAME}:main.0" -T "coding:${CLI}"
+tmux select-pane -t "${SESSION_NAME}:main.1" -T "stats"
+tmux select-pane -t "${SESSION_NAME}:main.0"
+tmux set-option -g extended-keys on 2>/dev/null || true
+tmux set-option -t "${SESSION_NAME}" extended-keys on 2>/dev/null || true
+tmux set-option -t "${SESSION_NAME}" pane-border-status top
+tmux set-option -t "${SESSION_NAME}" pane-border-format " #{pane_index}: #{pane_title} "
+tmux set-option -t "${SESSION_NAME}" remain-on-exit off
+tmux set-hook -t "${SESSION_NAME}" pane-exited "kill-session -t '${SESSION_NAME}'"
+tmux set-hook -t "${SESSION_NAME}" after-kill-pane "kill-session -t '${SESSION_NAME}'"
+# After create: track attaching client so wide terminals fill (no .... stipple)
+_fit_window_to_client
+
+sleep 0.3
+if ! _session_looks_healthy; then
+  echo "tok-tua: failed to create 2-pane layout (coding + stats). Debug:" >&2
+  tmux list-panes -t "${SESSION_NAME}" -F '#{pane_index}|#{pane_title}|#{pane_current_command}|dead=#{pane_dead}' 2>&1 >&2 || true
+  tmux capture-pane -t "${SESSION_NAME}:main.0" -p 2>&1 | head -20 >&2 || true
+  tmux capture-pane -t "${SESSION_NAME}:main.1" -p 2>&1 | head -20 >&2 || true
+  exit 1
+fi
+
+echo "Started tok-tua (cli=${CLI} model=${MODEL} scale=${SCALE}; Headroom=${HEADROOM_BASE}; stats=${STATS_PCT}%)"
+echo "  repo=${REPO_ROOT}  short=${SHORT_CMD}"
+echo "  panes: coding:${CLI} (left) · stats (right) · window follows client size"
+_attach_session

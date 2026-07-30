@@ -1,0 +1,291 @@
+#!/usr/bin/env bash
+# grok-tua — launch wrapper: SuperGrok CLI + live metrics monitor (tmux).
+#
+# Primary name for the former "grok-tok-on-lock" wrapper. Intended as a small
+# public GitHub project after the ACL deadline.
+#
+# Usage:
+#   bin/grok-tua                 # grok + Textual dashboard (default)
+#   bin/grok-tua dashboard       # grok + Textual dashboard (Herdr/Headroom/LiteLLM + burn)
+#   bin/grok-tua watch           # explicit watch mode (local session burn loop)
+#   bin/grok-tua stack           # headless gateway stack snapshot only
+#   bin/grok-tua attach          # attach existing tmux session
+#   bin/grok-tua voice …         # STT/TTS + manager-auto voice check (talk2ya)
+#   bin/grok-tua --fresh         # kill existing session and start clean
+#
+# Layout: main pane (left ~80%) runs `grok`; stats pane (right ~20%) metrics.
+# Override with GROK_TUA_STATS_PCT (legacy default was 28).
+# On launch: smoke-probes Headroom/LiteLLM/Grafana/Prompt-I/O and can restart
+# known Docker containers when down (GROK_TUA_NO_SMOKE=1 to skip;
+# GROK_TUA_SMOKE_HEAL=0 for probe-only).
+# Quit either pane once → whole session ends (back to outer shell).
+#
+# Gateway agents (OWUI/pi/omp) should still use Headroom → LiteLLM directly.
+# This wrapper is for SuperGrok Build CLI sessions + visibility into the bus.
+
+set -euo pipefail
+
+# Resolve symlinks so PATH install (~/.local/bin/grok-tua -> bin/grok-tua)
+# still finds the grokcode repo (dirname "$0" alone yields ~/.local).
+_src="${BASH_SOURCE[0]}"
+while [[ -L "${_src}" ]]; do
+  _dir="$(cd -P "$(dirname "${_src}")" && pwd)"
+  _src="$(readlink "${_src}")"
+  [[ "${_src}" != /* ]] && _src="${_dir}/${_src}"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "${_src}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SESSION_NAME="${GROK_TUA_SESSION:-${GROK_TOK_SESSION:-grok-tua}}"
+# Narrow right strip so coding + stack health both fit; was 28.
+STATS_PCT="${GROK_TUA_STATS_PCT:-20}"
+
+if [[ -x "${REPO_ROOT}/.venv/bin/python" ]]; then
+  PYTHON="${REPO_ROOT}/.venv/bin/python"
+else
+  PYTHON="$(command -v python3 || true)"
+fi
+
+if [[ -z "${PYTHON}" ]]; then
+  echo "grok-tua: python3 not found" >&2
+  exit 1
+fi
+
+# Ensure package imports work even if the venv lacks an editable install.
+export PYTHONPATH="${REPO_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
+
+# Local gateway defaults (a local Headroom/LiteLLM compose stack on 127.0.0.1).
+export HEADROOM_BASE="${HEADROOM_BASE:-http://127.0.0.1:8787}"
+export LITELLM_BASE="${LITELLM_BASE:-http://127.0.0.1:4000}"
+
+# Load this repo's own .env (copy .env.example -> .env and fill in your
+# values). Replaces the old hardcoded ~/ai-gateway/.env sibling-repo lookup.
+if [[ -f "${REPO_ROOT}/.env" ]]; then
+  # shellcheck disable=SC1091
+  set -a && source "${REPO_ROOT}/.env" && set +a
+elif [[ ! -f "${REPO_ROOT}/.env.example" ]]; then
+  echo "grok-tua: warning: no .env found in ${REPO_ROOT} (see .env.example)" >&2
+fi
+
+# Optional LAN fallback gateway (e.g. a second machine on your network running
+# Headroom). Set NAS_HOST_IP in .env to enable this; skipped otherwise.
+if [[ -n "${NAS_HOST_IP:-}" ]] && ! curl -sf --max-time 1 "${HEADROOM_BASE}/readyz" >/dev/null 2>&1; then
+  if curl -sf --max-time 1 "http://${NAS_HOST_IP}:8787/readyz" >/dev/null 2>&1; then
+    export HEADROOM_BASE="http://${NAS_HOST_IP}:8787"
+    export LITELLM_BASE="${LITELLM_BASE_FALLBACK:-http://${NAS_HOST_IP}:4000}"
+  fi
+fi
+
+# Launch smoke: show grafana/headroom/litellm/prompt-io; optional docker restart.
+_smoke_stack() {
+  if [[ "${GROK_TUA_NO_SMOKE:-0}" == "1" ]]; then
+    return 0
+  fi
+  local heal_flag=()
+  if [[ "${GROK_TUA_SMOKE_HEAL:-1}" != "0" ]]; then
+    heal_flag=(--heal)
+  fi
+  # Best-effort: never block launch on smoke failures.
+  (
+    cd "${REPO_ROOT}" &&
+      env HEADROOM_BASE="${HEADROOM_BASE}" LITELLM_BASE="${LITELLM_BASE}" \
+        PYTHONPATH="${PYTHONPATH}" \
+        "${PYTHON}" -m grok_tua.stack_smoke "${heal_flag[@]}" --timeout 2
+  ) || true
+  # Re-evaluate LAN fallback after heal attempts
+  if [[ -n "${NAS_HOST_IP:-}" ]] && ! curl -sf --max-time 1 "${HEADROOM_BASE}/readyz" >/dev/null 2>&1; then
+    if curl -sf --max-time 1 "http://${NAS_HOST_IP}:8787/readyz" >/dev/null 2>&1; then
+      export HEADROOM_BASE="http://${NAS_HOST_IP}:8787"
+      export LITELLM_BASE="${LITELLM_BASE_FALLBACK:-http://${NAS_HOST_IP}:4000}"
+      echo "[grok-tua] using LAN fallback gateway after smoke: Headroom=${HEADROOM_BASE}"
+    fi
+  fi
+}
+
+# Pane main processes (tmux runs these as the pane command; exit closes the pane).
+WATCH_CMD="${PYTHON} bin/grok_credit_usage_report.py watch"
+# GROK_TUA_STACK_COMPACT=1 keeps the right-pane version board short
+DASH_CMD="env HEADROOM_BASE=${HEADROOM_BASE} LITELLM_BASE=${LITELLM_BASE} GROK_TUA_STACK_COMPACT=1 PYTHONPATH=${PYTHONPATH} ${PYTHON} -m grok_tua.dashboard"
+STACK_CMD="env HEADROOM_BASE=${HEADROOM_BASE} LITELLM_BASE=${LITELLM_BASE} PYTHONPATH=${PYTHONPATH} ${PYTHON} -m grok_tua.dashboard --check"
+GROK_CMD="grok"
+
+FORCE_FRESH=0
+MODE="dashboard"
+# voice subcommand: grok-tua voice check | llm-check | speak | ptt …
+if [[ "${1:-}" == "voice" ]]; then
+  shift
+  exec env HEADROOM_BASE="${HEADROOM_BASE}" LITELLM_BASE="${LITELLM_BASE}" \
+    PYTHONPATH="${PYTHONPATH}" "${PYTHON}" -m grok_tua.voice "$@"
+fi
+
+for arg in "$@"; do
+  case "${arg}" in
+    --fresh|fresh)
+      FORCE_FRESH=1
+      ;;
+    -h|--help|help)
+      sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+      exit 0
+      ;;
+    attach|stack|check|dashboard|dash|watch|smoke)
+      MODE="${arg}"
+      ;;
+    *)
+      echo "Usage: $0 [dashboard|watch|stack|smoke|attach|voice …] [--fresh]" >&2
+      exit 1
+      ;;
+  esac
+done
+
+case "${MODE}" in
+  attach)
+    if tmux has-session -t "${SESSION_NAME}" 2>/dev/null; then
+      exec tmux attach -t "${SESSION_NAME}"
+    fi
+    echo "grok-tua: no session '${SESSION_NAME}'" >&2
+    exit 1
+    ;;
+  stack|check)
+    _smoke_stack
+    # Rebuild STACK_CMD with possibly-updated Headroom/LiteLLM after smoke
+    STACK_CMD="env HEADROOM_BASE=${HEADROOM_BASE} LITELLM_BASE=${LITELLM_BASE} PYTHONPATH=${PYTHONPATH} ${PYTHON} -m grok_tua.dashboard --check"
+    exec bash -c "cd '${REPO_ROOT}' && ${STACK_CMD}"
+    ;;
+  smoke)
+    _smoke_stack
+    exit 0
+    ;;
+  dashboard|dash)
+    RIGHT_CMD="${DASH_CMD}"
+    ;;
+  watch)
+    RIGHT_CMD="${WATCH_CMD}"
+    ;;
+esac
+
+if ! command -v tmux >/dev/null 2>&1; then
+  echo "grok-tua: tmux is required (brew install tmux)" >&2
+  exit 1
+fi
+
+_session_looks_healthy() {
+  # Healthy: 2 live panes titled coding/stats (or running expected commands).
+  local pane_count dead titles cmds
+  pane_count="$(tmux list-panes -t "${SESSION_NAME}" 2>/dev/null | wc -l | tr -d ' ')"
+  [[ "${pane_count}" == "2" ]] || return 1
+  dead="$(tmux list-panes -t "${SESSION_NAME}" -F '#{pane_dead}' 2>/dev/null | tr -d '\n')"
+  [[ "${dead}" == "00" ]] || return 1
+  titles="$(tmux list-panes -t "${SESSION_NAME}" -F '#{pane_title}' 2>/dev/null | tr '\n' ' ')"
+  if echo "${titles}" | grep -q 'coding' && echo "${titles}" | grep -q 'stats'; then
+    return 0
+  fi
+  cmds="$(tmux list-panes -t "${SESSION_NAME}" -F '#{pane_current_command}' 2>/dev/null || true)"
+  echo "${cmds}" | grep -qiE 'grok|python' && return 0
+  return 1
+}
+
+if [[ "${FORCE_FRESH}" == "1" ]] || [[ "${GROK_TUA_FRESH:-0}" == "1" ]]; then
+  tmux kill-session -t "${SESSION_NAME}" 2>/dev/null || true
+fi
+
+# Seed size for detached create/split only; after attach we track the client (no dotted fill).
+# Without -x/-y, new-session -d uses default-size 80x24 and stays there if fit fails.
+_seed_cols="${COLUMNS:-}"
+_seed_rows="${LINES:-}"
+if [[ -z "${_seed_cols}" || "${_seed_cols}" -lt 40 ]]; then
+  _seed_cols="$(tput cols 2>/dev/null || echo 280)"
+fi
+if [[ -z "${_seed_rows}" || "${_seed_rows}" -lt 12 ]]; then
+  _seed_rows="$(tput lines 2>/dev/null || echo 60)"
+fi
+# Prefer a generous seed when env is empty/small so splits never hit "size missing"
+[[ "${_seed_cols}" -lt 240 ]] && _seed_cols=280
+[[ "${_seed_rows}" -lt 40 ]] && _seed_rows=60
+TMUX_COLS="${GROK_TUA_COLS:-${_seed_cols}}"
+TMUX_ROWS="${GROK_TUA_ROWS:-${_seed_rows}}"
+
+# Always re-apply window-size latest: resize-window forces manual and locks later
+# client resizes (classic dotted strip when window < client).
+_set_window_size_latest() {
+  tmux set-window-option -t "${SESSION_NAME}:main" window-size latest 2>/dev/null \
+    || tmux set-option -t "${SESSION_NAME}" window-size latest 2>/dev/null || true
+}
+
+# Grow window to current TTY (or keep seed). Leaves window-size=latest so drag-resize follows.
+_fit_window_to_client() {
+  local cols rows
+  tmux set-option -t "${SESSION_NAME}" aggressive-resize on 2>/dev/null || true
+  _set_window_size_latest
+  if [[ -t 1 ]]; then
+    cols="$(tput cols 2>/dev/null || echo 0)"
+    rows="$(tput lines 2>/dev/null || echo 0)"
+    if [[ "${cols}" -ge 40 && "${rows}" -ge 12 ]]; then
+      tmux resize-window -t "${SESSION_NAME}:main" -x "${cols}" -y "${rows}" 2>/dev/null || true
+      # resize-window sets window-size=manual — restore latest so later resizes work
+      _set_window_size_latest
+      return 0
+    fi
+  fi
+  # Detached / no TTY: unlock from manual size if a client is already attached
+  tmux resize-window -t "${SESSION_NAME}:main" -A 2>/dev/null || true
+  _set_window_size_latest
+}
+
+_attach_session() {
+  _fit_window_to_client
+  exec tmux attach -t "${SESSION_NAME}"
+}
+
+if tmux has-session -t "${SESSION_NAME}" 2>/dev/null; then
+  if _session_looks_healthy; then
+    echo "Attaching to existing session '${SESSION_NAME}' (kill: tmux kill-session -t ${SESSION_NAME}; or: grok-tua --fresh)"
+    _attach_session
+  fi
+  echo "[grok-tua] Session '${SESSION_NAME}' looks stale/broken — recreating"
+  tmux kill-session -t "${SESSION_NAME}" 2>/dev/null || true
+fi
+
+if [[ ! -f "${REPO_ROOT}/data/catalog/repo_search_index.json" ]]; then
+  echo "[grok-tua] Tip: ${PYTHON} bin/grok_credit_usage_report.py index before recon" >&2
+fi
+
+# Probe + optional heal before panes open so the right panel starts truthful.
+_smoke_stack
+# Refresh dashboard command if smoke flipped env to the LAN fallback host
+DASH_CMD="env HEADROOM_BASE=${HEADROOM_BASE} LITELLM_BASE=${LITELLM_BASE} GROK_TUA_STACK_COMPACT=1 PYTHONPATH=${PYTHONPATH} ${PYTHON} -m grok_tua.dashboard"
+if [[ "${MODE}" == "dashboard" || "${MODE}" == "dash" ]]; then
+  RIGHT_CMD="${DASH_CMD}"
+fi
+
+# Left: coding (grok). Right: stats (narrow). -c sets cwd; command is pane main process.
+tmux new-session -d -s "${SESSION_NAME}" -x "${TMUX_COLS}" -y "${TMUX_ROWS}" -c "${REPO_ROOT}" -n main \
+  "${GROK_CMD}"
+# Force window size before split (detached create often has no client size → "size missing")
+tmux resize-window -t "${SESSION_NAME}:main" -x "${TMUX_COLS}" -y "${TMUX_ROWS}" 2>/dev/null || true
+# tmux 3.x: prefer -l N% over deprecated -p for horizontal stats strip
+if ! tmux split-window -h -t "${SESSION_NAME}:main" -c "${REPO_ROOT}" -l "${STATS_PCT}%" \
+  "${RIGHT_CMD}" 2>/dev/null; then
+  # Min 32 cols for compact meters; was 40 at 28% width.
+  RIGHT_COLS=$(( TMUX_COLS * STATS_PCT / 100 ))
+  [[ "${RIGHT_COLS}" -lt 32 ]] && RIGHT_COLS=32
+  tmux split-window -h -t "${SESSION_NAME}:main" -c "${REPO_ROOT}" -l "${RIGHT_COLS}" \
+    "${RIGHT_CMD}"
+fi
+
+tmux select-pane -t "${SESSION_NAME}:main.0" -T "coding"
+tmux select-pane -t "${SESSION_NAME}:main.1" -T "stats"
+tmux select-pane -t "${SESSION_NAME}:main.0"
+tmux set-option -g extended-keys on 2>/dev/null || true
+tmux set-option -t "${SESSION_NAME}" extended-keys on 2>/dev/null || true
+tmux set-option -t "${SESSION_NAME}" pane-border-status top
+tmux set-option -t "${SESSION_NAME}" pane-border-format " #{pane_index}: #{pane_title} "
+tmux set-option -t "${SESSION_NAME}" remain-on-exit off
+# One quit (either pane) tears down the whole session → back to outer shell.
+# pane-exited: process ended (ctrl+q / dashboard q). after-kill-pane: pane killed.
+tmux set-hook -t "${SESSION_NAME}" pane-exited "kill-session -t '${SESSION_NAME}'"
+tmux set-hook -t "${SESSION_NAME}" after-kill-pane "kill-session -t '${SESSION_NAME}'"
+# After create: track attaching client so wide terminals fill (no .... stipple)
+_fit_window_to_client
+
+echo "Started grok-tua (${MODE}; Headroom=${HEADROOM_BASE} LiteLLM=${LITELLM_BASE}; stats=${STATS_PCT}%)"
+echo "  repo=${REPO_ROOT}  python=${PYTHON}  (window follows client size)"
+_attach_session

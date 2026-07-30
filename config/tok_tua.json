@@ -1,0 +1,67 @@
+{
+  "version": 1,
+  "description": "tok-tua: multi-CLI agent launcher with Headroom metrics (GPU-host-preferred manager-auto).",
+  "qqq": {
+    "earmark": true,
+    "default": "QQQ0",
+    "docs": "docs/operations/QQQ_CODING_ORCHESTRATION.md",
+    "config": "config/qqq_orchestration.json",
+    "flag": "--qqq 0|1|3",
+    "env": "TOK_TUA_QQQ",
+    "note": "QQQ modes selectable from tok-tua / Deck / OpenWebUI when wired; default local-only QQQ0"
+  },
+  "defaults": {
+    "model": "manager-auto",
+    "cli": "codex",
+    "scale": "single",
+    "stats_pct": 28,
+    "session_name": "tok-tua",
+    "gateway": "http://127.0.0.1:8787/v1",
+    "headroom_base": "http://127.0.0.1:8787",
+    "litellm_base": "http://127.0.0.1:4000",
+    "turnstone_base": "http://127.0.0.1:8090",
+    "_comment_lan_fallback": "Optional LAN gateway host — fill in and rename keys below without the leading underscore/comment to use.",
+    "nas_host_headroom": "http://<nas-host-ip>:8787",
+    "nas_host_litellm": "http://<nas-host-ip>:4000",
+    "wrap_host_cli": "omp"
+  },
+  "scales": [
+    "single",
+    "herdr",
+    "turnstone"
+  ],
+  "phi_forbidden_models": [
+    "manager-openrouter-free",
+    "manager-gemini-paid",
+    "manager-grok-paid"
+  ],
+  "voice": {
+    "enabled": true,
+    "orchestrator": "vox",
+    "io_backend": "talk2ya",
+    "ptt_mode": "software_hotkey",
+    "input_device_match": ["JOUNIVO", "JV-601", "JV601"],
+    "model": "manager-auto",
+    "gateway": "http://127.0.0.1:8787/v1",
+    "docs": "docs/operations/TOK_TUA.md#voice-mode-talk2ya--vox"
+  },
+  "vision": {
+    "enabled": true,
+    "backend": "show-u-a",
+    "route": "manager-vision",
+    "opencv": true,
+    "ocr_tua_url": "http://127.0.0.1:8798",
+    "docs": "docs/operations/TOK_TUA.md#vision-earmark-show-u-a"
+  },
+  "claude": {
+    "default_mode": "gateway",
+    "env": "TOK_TUA_CLAUDE_MODE",
+    "modes": {
+      "gateway": "ANTHROPIC_BASE_URL → Headroom :8787; token metrics via Headroom/LiteLLM (official Claude Code LLM-gateway path)",
+      "native": "claude.ai subscription login; no Headroom metering; do not scrape OAuth usage"
+    },
+    "binary_wrapper": "~/.local/bin/claude",
+    "setup": "optional: your own gateway setup script for Claude Code, if you have one"
+  },
+  "notes": "Clients use Headroom :8787 only; never bypass to raw worker :4000 for normal launches. Claude uses Anthropic protocol on the same front door."
+}

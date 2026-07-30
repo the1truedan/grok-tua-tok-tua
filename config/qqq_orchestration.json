@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "updated": "2026-07-23",
+  "status": "earmark",
+  "name": "QQQ",
+  "expansion": "Queue Queue Queue — multi-source plan merge execute coda",
+  "docs": "docs/operations/QQQ_CODING_ORCHESTRATION.md",
+  "default_mode": "QQQ0",
+  "selectable_from": ["tok-tua", "maintenance_deck", "open_webui"],
+  "modes": {
+    "QQQ": {
+      "label": "Multi-plan merge coda",
+      "description": "Collect plans from Grok/Codex/Claude/other, merge best practice, execute local-first",
+      "planning_sources": ["grok", "codex", "claude", "other_agentic"],
+      "execute_prefer": "QQQ0",
+      "gates": ["karen", "ladies", "manager"]
+    },
+    "QQQ0": {
+      "label": "Local LLM only",
+      "description": "MANAGER orchestrates TUI/OpenWebUI/agentic module calls; no paid cloud required",
+      "hosts": {
+        "reasoning": "gpu-host",
+        "turbo_quant": "mac-client",
+        "best_available": "nas-host"
+      },
+      "gateway": "http://127.0.0.1:8787/v1",
+      "default_model": "manager-auto",
+      "coding_example": "qwen-with-tools on preferred coding host",
+      "complex_tasks": "segment plan → staged orchestration",
+      "stack": ["headroom", "litellm", "tok-tua", "herdr_or_turnstone"],
+      "cloud": false
+    },
+    "QQQ1": {
+      "label": "Paid cloud code subscriptions",
+      "sources": [
+        "grok",
+        "chatgpt",
+        "claude",
+        "gemini_google_one",
+        "gemini_gtc_edu",
+        "openrouter_paid",
+        "hf_spaces",
+        "darkbloom",
+        "other_cloud_compute"
+      ],
+      "requires": ["explicit_mode_select", "data_class_not_phi", "narc_gate"],
+      "cloud": true
+    },
+    "QQQ3": {
+      "label": "Kitchen sink free/public",
+      "sources": ["mimo_cloud", "openrouter_free", "other_free_facades"],
+      "requires": ["data_class_public", "narc_gate"],
+      "refuse_if": ["phi", "phi-adjacent", "caregiving_dumps"],
+      "cloud": true
+    }
+  },
+  "reserved": {
+    "QQQ2": "Future hybrid SLA tier"
+  },
+  "cli_earmark": {
+    "tok_tua_flag": "--qqq 0|1|3",
+    "env": "TOK_TUA_QQQ",
+    "grok_tua": "SuperGrok burn path remains separate; QQQ1 may include it"
+  },
+  "consensus": {
+    "vetters": ["K.A.R.E.N.", "L.A.D.I.E.S."],
+    "executor": "M.A.N.A.G.E.R.",
+    "routing": "Headroom compress → LiteLLM route → best host"
+  }
+}

@@ -1,42 +1,30 @@
 # grok-tua / tok-tua
 
-Two companion terminal launch-wrappers for coding-CLI sessions, built around a
-shared local LLM gateway ("Headroom" → LiteLLM). Both give you a tmux session
-with your coding CLI on one side and a live metrics panel (gateway health,
-spend, CLI versions, credit/quota tallies) on the other.
+Two small launchers that open a coding CLI next to a live status pane (gateway
+health, rough spend, system meters). They talk to a local LLM gateway
+(Headroom → LiteLLM) so you can see whether the stack is alive before you
+burn a session.
 
-They ship in one repo because they **cross-import each other**:
-`grok_tua/voice.py` imports from `tok_tua.voice`, and `tok_tua/stack_metrics.py`
-imports from `grok_tua.stack_metrics`. Splitting them would break both.
+They live in **one repo on purpose**: each imports a bit of the other. Split
+them and both break.
 
-## What each tool does
+## What each one is for
 
-**`grok-tua`** — launch wrapper specifically for xAI's Grok/SuperGrok Build
-CLI. Opens a two-pane tmux session: `grok` on the left, a Textual metrics
-dashboard on the right showing gateway health, SuperGrok session burn/quota,
-system meters (CPU/RAM/GPU), and git status. On launch it smoke-tests your
-local gateway stack and can optionally restart known Docker containers or a
-remote host's containers over SSH if things are down.
+**`grok-tua`** — for the Grok / SuperGrok Build CLI. Left pane: `grok`. Right
+pane: a compact dashboard (gateway, quota burn, CPU/RAM/GPU, git). On start it
+can poke local Docker (and optionally a remote host) if something looks down.
 
-**`tok-tua`** — a more general multi-CLI launcher ("Token Textual User
-Agent"). Same tmux + metrics-dashboard idea, but works with any of several
-coding CLIs (Codex, Claude Code, Cursor, aider, OpenCode, pi, omp, tau, or
-Grok itself — see `tok_tua/providers.py` for the full registry) routed
-through the shared gateway using a `manager-*` model route (see
-`tok_tua/routes.py`). It also implements:
-- **QQQ mode** (`--qqq 0|1|3`): a coarse routing gate between local-only,
-  paid-cloud, and free-cloud model tiers, with a PHI/data-class refusal rule
-  (`tok_tua/qqq.py`, `config/qqq_orchestration.json`).
-- **Scale modes** (`--scale single|herdr|turnstone`): single tmux pane pair,
-  a multi-agent "herdr" launcher, or opening a "Turnstone" web UI
-  (`tok_tua/scale.py`, `tok_tua/turnstone_client.py`).
-- **Session adapters** for per-CLI session-file introspection (Codex, Grok,
-  generic) used to show recent session context in the dashboard.
+**`tok-tua`** — same idea for *other* coding CLIs (Claude Code, Codex, Cursor,
+aider, OpenCode, and friends — see `tok_tua/providers.py`). Extra knobs:
 
-Both tools pull shared plumbing from `context/` (vendored from the original
-monorepo's `integrations/context` and `memory` packages — see below) and
-`grok_tua/cloud_credits.py` / `grok_tua/stats_board.py` for multi-vendor
-credit/quota tallying (OpenRouter, Gemini, OpenAI, Claude, xAI).
+- **QQQ** (`--qqq 0|1|3`) — prefer local vs paid cloud vs free cloud, with a
+  hard “don’t send sensitive care data to the wrong place” rule.
+- **Scale** (`--scale single|herdr|turnstone`) — one tmux pair, a multi-agent
+  layout, or a web UI hook.
+- **Session adapters** — light read of recent CLI session files for the panel.
+
+Shared helpers live under `context/`, plus credit tally helpers for the usual
+vendor dashboards (OpenRouter, Gemini, OpenAI, Claude, xAI).
 
 ## Layout
 

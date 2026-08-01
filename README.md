@@ -97,6 +97,31 @@ PYTHONPATH=. python3 -m tok_tua providers
 PYTHONPATH=. python3 -m grok_tua.dashboard --check
 ```
 
+
+## How this came to be
+
+Once the local gateway worked, the bottleneck became *starting work*: which
+CLI, which model tier, is Headroom up, am I about to burn cloud credit by
+mistake? **grok-tua** and **tok-tua** are the launchers that put a coding CLI
+beside a live status pane.
+
+They came out of daily ACL crunch — cloud LLMs helping design QQQ routing and
+smoke checks, local repo holding the real scripts. Extracted from the monorepo
+so the launchers can version on their own, then published after the submission
+push.
+
+**Timeline anchors:** monorepo tooling **July 2026** (v0.2 era); public extract
+late **July 2026**.
+
 ## License
 
 MIT — see `LICENSE`.
+
+---
+
+<p align="left">
+  <a href="https://linktr.ee/the1truedan"><img src="https://img.shields.io/badge/Linktree-39E09B?style=for-the-badge&logo=linktree&logoColor=white" alt="Linktree"></a>
+  <a href="https://ko-fi.com/the1truedan"><img src="https://img.shields.io/badge/Ko--fi-F16061?style=for-the-badge&logo=ko-fi&logoColor=white" alt="Ko-fi"></a>
+</p>
+
+**© 2026 M.A.N.A.G.E.R. LLC** — *prepare for the care when we cannot be there*

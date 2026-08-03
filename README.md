@@ -105,13 +105,13 @@ CLI, which model tier, is Headroom up, am I about to burn cloud credit by
 mistake? **grok-tua** and **tok-tua** are the launchers that put a coding CLI
 beside a live status pane.
 
-They came out of daily ACL crunch — cloud LLMs helping design QQQ routing and
-smoke checks, local repo holding the real scripts. Extracted from the monorepo
-so the launchers can version on their own, then published after the submission
-push.
+They grew out of daily shipping on a caregiving product stack — cloud LLMs
+helping sketch QQQ routing and smoke checks, local repo holding the real
+scripts. Extracted from the monorepo so the launchers can version on their
+own, then published as a small public piece of a larger local-first lab.
 
 **Timeline anchors:** monorepo tooling **July 2026** (v0.2 era); public extract
-late **July 2026**.
+late **July / early August 2026**.
 
 ## License
 

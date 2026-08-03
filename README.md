@@ -8,6 +8,88 @@ burn a session.
 They live in **one repo on purpose**: each imports a bit of the other. Split
 them and both break.
 
+## What it looks like
+
+**`grok-tua`** — Grok CLI on the left, stack + quota + fleet dashboard on the right:
+
+![grok-tua TUI](docs/assets/groktua-tui.png)
+
+**`tok-tua`** — any CLI (here: opencode) on the left, gateway + CLI versions + cloud credits on the right:
+
+![tok-tua TUI](docs/assets/toktua-tui.png)
+
+<sub>Screenshots are from a real session on the author's lab. Host nicknames and
+version numbers are left as-is; one LAN address and one home directory path are
+blacked out. Spend and quota figures shown are the author's own.</sub>
+
+## Reading the dashboard
+
+The screenshots compress badly, so here is every field, transcribed.
+
+### Shared by both — Gateway · Stack · Credits
+
+| Row | Example | What it means |
+|---|---|---|
+| `Path` | `headroom→litellm OK (healthy)` | End-to-end gateway chain reachable |
+| `Headroom` | `OK · models=18 · 127.0.0.1:8787` | Context-conservation proxy; model count it advertises |
+| `LiteLLM` | `OK · models=8 · 127.0.0.1:4000` | Router / spend ledger |
+| `Prompt-I/O` | `up · 127.0.0.1:5050/health` | Prompt capture service |
+| `Grafana` / `openweb-ui` / `Turnstone` | `12.1.0` / `:8080` / `:8090` | Dashboards and agent-workflow UI |
+| `Herdr` | `0.7.5` | Fleet helper |
+| CLI rows | `codex 0.0440` · `claude 2.1.219` · `pi 0.82.1` · `omp 17.1.8` · `opencode 1.18.7` · `grok 0.2.118` · `aider 0.86.2` · `cursor 3.14.7` · `tau 0.2.3` | **Installed version of every coding CLI on the box.** This is the "which agent am I actually running" answer that usually costs a `--version` round trip each. |
+
+**Spend + credits**
+
+| Row | Example | Note |
+|---|---|---|
+| `Spend $` | `today=0.0000 window=0.1396` | From LiteLLM — the metered source of truth |
+| `Session $` | `1.2974 (Grok Build · not in LiteLLM)` | Vendor-side burn the gateway can't see |
+| `SuperGrok` | `~0% left · used 100%` | Weekly quota |
+| `OpenRouter` | `$1/$1 left · free-tier · reset monthly` | |
+| `Gemini` / `xAI` | `key ok · models=50` / `models=10` | Key health; `$` lives in the vendor UI |
+| `ChatGPT/OpenAI` | `OPENAI_API_KEY is LiteLLM master` | **Diagnostic, not an error.** Your gateway key is not a vendor key — set `OPENAI_CLOUD_API_KEY` if you want a real cloud-dollar row. Codex still meters through Headroom either way. |
+
+**Model aliases** — `HR models` are Headroom-side routes (`manager-auto`, `-plan`, `-code`,
+`-review`, `-reason`); `LL models` are the LiteLLM workers behind them
+(`manager-worker-m4-code`, `-research`, `-reason`, `-review`, `-vision`).
+
+### `grok-tua` only
+
+**System / Fleet** — local CPU / RAM / GPU / disk, then every host in the fleet on one line
+each (`CPU 7% · RAM 78% · GPU 0% 248/16380MB 39C`), including GPU memory and temperature.
+A host that can't be reached reads `UNKNOWN` rather than zero — unavailable is not the same
+as idle.
+
+**Active Session**
+
+| Field | Example | Meaning |
+|---|---|---|
+| `Burn` | `LOW · grok-4.5` | Rough spend rate + model |
+| `Tools` / `Turns` / `Compact` | `85` / `3` / `0` | Tool calls, turns, compaction events |
+| `Context` | `31% 155,246 / 500,000` | Window used |
+| `Last turn` | `in 700,319 out 3,737 reason 2,321 · cache 677,248 $0.2717` | Per-turn token split incl. reasoning and cache-read |
+| `Σ session` | `in 2,652,557 out 43,928 · cost $1.2974` | Session totals |
+
+**Quota · Conservation** — `~0% left (used 100%)`, week-end date, and lifetime counters:
+`Sessions 57`, `Tool calls 6,013`, `Tokens~ 278.22M (pre-compact)`. Read from the vendor
+billing log, not estimated.
+
+### `tok-tua` only
+
+**LAUNCH** — resolved CLI, model, cloud flag, and the binary path actually being executed.
+
+**WRAP FAÇADES** — `openrouter-wrap` and `gemini-wrap`, both `ready host=omp`. Deliberately
+listed *outside* the Stack board: they are routing shims, not services with health of their own.
+
+**TIPS** — context-appropriate next commands (`tok-tua --cli codex`, `turnstone-cli health`,
+`curl -s localhost:8765/api/stack/stats | head`).
+
+### The point of all this
+
+One screen answers: *is the gateway up, which CLI versions am I on, how much have I spent,
+how much quota is left, and is the fleet healthy* — before you start a session rather than
+after it fails. That is the whole reason these exist.
+
 ## What each one is for
 
 **`grok-tua`** — for the Grok / SuperGrok Build CLI. Left pane: `grok`. Right

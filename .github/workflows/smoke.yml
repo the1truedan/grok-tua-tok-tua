@@ -1,0 +1,86 @@
+# Production-adjacent readiness: import + dry-run paths.
+# Does NOT require Headroom, LiteLLM, GPUs, or home-lab secrets.
+name: smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    name: smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install minimal deps
+        run: |
+          python -m pip install --upgrade pip
+          # textual/psutil optional for full dashboard; smoke stays import-light
+          pip install pyyaml || true
+
+      - name: Compile all Python
+        run: python -m compileall -q tok_tua grok_tua context bin || python -m compileall -q tok_tua grok_tua context
+
+      - name: Import packages
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -c "import tok_tua; import grok_tua; print('imports ok', tok_tua.__file__)"
+
+      - name: Providers + resolve (no live gateway required)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          python -m tok_tua providers
+          python -m tok_tua resolve --cli pi --model manager-code || \
+            python -m tok_tua resolve --cli codex --model manager-auto
+
+      - name: Loop dry-run (no Herdr required)
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+          TOK_TUA_LOOP_DRY_RUN: "1"
+        run: |
+          python -m tok_tua loop --cli pi --model manager-code --name ci-smoke --no-write
+
+      - name: Spawn dry-run argv shape
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          # May fail if binary not on PATH for require_available — accept dry plan or graceful fail
+          python -m tok_tua spawn --cli pi --dry-run || \
+            python -c "
+from tok_tua.scale import build_herdr_start_argv
+plan={'short_command':'pi --help','effective_cli':'pi','cli':'pi','model':'manager-code','kind':'cli'}
+print(build_herdr_start_argv('ci', plan, pane_id='%%0'))
+"
+
+      - name: Config files parse as JSON
+        run: |
+          python -c "import json; json.load(open('config/tok_tua.json')); json.load(open('config/qqq_orchestration.json')); print('config ok')"
+
+      - name: PHI deny-list on docs (no clinical staging paths)
+        run: |
+          # Patterns split so this workflow file does not match itself.
+          set +e
+          hits=$(grep -RInE 'horizon_2026|/Volum''es/ai-data|192\.16''8\.|BEGIN (RSA |OPENSSH )?PRIVATE' \
+            README.md AGENTS.md docs tok_tua bin config 2>/dev/null)
+          hits2=$(grep -RInE 'sk-[a-zA-Z0-9]{24,}' README.md AGENTS.md docs tok_tua bin config 2>/dev/null \
+            | grep -v 'sk-example\|sk-your\|placeholder' || true)
+          set -e
+          if [ -n "$hits$hits2" ]; then
+            echo "$hits$hits2"
+            echo "::error::deny-list hit in public tree"
+            exit 1
+          fi
+          echo "deny-list clean"

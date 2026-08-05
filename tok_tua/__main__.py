@@ -14,6 +14,13 @@ if str(_REPO) not in sys.path:
 
 
 def main(argv: Optional[List[str]] = None) -> int:
+    argv_list = list(argv) if argv is not None else sys.argv[1:]
+    # Dispatch before argparse so flags like --cli reach loop.main.
+    if argv_list and argv_list[0] == "loop":
+        from tok_tua.loop import main as loop_main
+
+        return loop_main(argv_list[1:])
+
     parser = argparse.ArgumentParser(prog="tok-tua", description="Token Textual User Agent")
     sub = parser.add_subparsers(dest="cmd")
 
@@ -38,6 +45,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     p_spawn.add_argument("--cwd", default=None)
     p_spawn.add_argument("--dry-run", action="store_true")
 
+    sub.add_parser(
+        "loop",
+        help="Herdr wait-loop + handoff writeout (default dry-run; use --live)",
+    )
+
     p_ts = sub.add_parser("turnstone", help="Turnstone REST (pass-through)")
     p_ts.add_argument("ts_args", nargs=argparse.REMAINDER)
 
@@ -48,7 +60,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         help="check | speak TEXT | transcribe PATH | ptt | prompt TEXT",
     )
 
-    args = parser.parse_args(argv)
+    args = parser.parse_args(argv_list)
     cmd = args.cmd or "stack"
 
     if cmd == "stack":
@@ -104,6 +116,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         print(json.dumps(result, indent=2, default=str))
         return 0 if result.get("ok") else 1
+
+    if cmd == "loop":
+        from tok_tua.loop import main as loop_main
+
+        return loop_main([])
 
     if cmd == "turnstone":
         from tok_tua.turnstone_client import main as ts_main

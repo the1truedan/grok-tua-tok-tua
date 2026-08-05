@@ -14,7 +14,7 @@
     "model": "manager-auto",
     "cli": "codex",
     "scale": "single",
-    "stats_pct": 28,
+    "stats_pct": 20,
     "session_name": "tok-tua",
     "gateway": "http://127.0.0.1:8787/v1",
     "headroom_base": "http://127.0.0.1:8787",

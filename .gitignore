@@ -4,3 +4,7 @@ __pycache__/
 .venv/
 data/
 logs/
+.DS_Store
+**/.DS_Store
+docs/handoffs/SESSION_HANDOFF_*.md
+!docs/handoffs/.gitkeep

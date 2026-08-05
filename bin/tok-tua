@@ -16,7 +16,8 @@
 #   bin/tok-tua stack | providers | spawn | attach | dashboard
 #   bin/tok-tua --fresh
 #
-# Layout (scale=single): left CLI (~72%), right metrics (~28%).
+# Layout (scale=single): left CLI (~80%), right metrics (~20%) — matches grok-tua.
+# Override right strip with TOK_TUA_STATS_PCT (legacy default was 28).
 # Quit either pane → whole session ends.
 
 set -euo pipefail
@@ -30,7 +31,7 @@ done
 SCRIPT_DIR="$(cd -P "$(dirname "${_src}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 SESSION_NAME="${TOK_TUA_SESSION:-tok-tua}"
-STATS_PCT="${TOK_TUA_STATS_PCT:-28}"
+STATS_PCT="${TOK_TUA_STATS_PCT:-20}"
 CLI="${TOK_TUA_CLI:-}"
 MODEL="${TOK_TUA_MODEL:-}"
 SCALE="${TOK_TUA_SCALE:-single}"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 import subprocess
@@ -81,23 +82,35 @@ def build_herdr_start_argv(
     plan: dict[str, Any],
     *,
     cwd: str | None = None,
+    pane_id: str | None = None,
 ) -> list[str]:
-    """Allowlisted herdr agent start argv (no shell)."""
+    """Build a Herdr 0.7 agent-start argv (no shell).
+
+    Herdr owns pane creation (`herdr pane split`) and requires a canonical
+    `--kind` plus an existing `--pane`; older tok-tua code passed `--cwd` to
+    `agent start`, which Herdr rejects. The caller supplies the pane created
+    with the requested cwd.
+    """
     if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,48}$", name):
         raise ValueError(f"invalid agent name {name!r}")
     short = plan.get("short_command") or plan.get("effective_cli") or "codex"
     if plan.get("kind") == "url":
         raise ValueError("herdr scale does not start URL surfaces; use turnstone scale")
     cmd_argv = _argv_from_short_command(str(short))
-    argv = ["herdr", "agent", "start", name]
-    if cwd:
-        argv.extend(["--cwd", cwd])
-    # Pass gateway env via repeated --env (herdr supports --env KEY=VALUE)
-    if plan.get("gateway"):
-        # OPENAI_* set by wrapper env when herdr inherits; still pass model hints if needed
-        pass
+    effective_cli = str(plan.get("effective_cli") or plan.get("cli") or cmd_argv[0])
+    kind = effective_cli
+    supported = {"pi", "claude", "codex", "gemini", "cursor", "devin", "agy", "cline", "omp", "mastracode", "opencode", "copilot", "kimi", "kiro", "droid", "amp", "grok", "hermes", "kilo", "qodercli", "maki"}
+    if kind not in supported:
+        raise ValueError(f"Herdr does not support CLI kind {kind!r}")
+    if not pane_id:
+        pane_id = "<pane-id>"
+    argv = ["herdr", "agent", "start", name, "--kind", kind, "--pane", pane_id, "--timeout", "30000"]
+    # Herdr supplies the canonical executable. Pass only provider/model args.
+    extra = cmd_argv[1:]
+    if kind == "opencode" and not extra and plan.get("model"):
+        extra = ["--model", f"ai-gateway/{plan['model']}"]
     argv.append("--")
-    argv.extend(cmd_argv)
+    argv.extend(extra)
     return argv
 
 
@@ -110,10 +123,48 @@ def spawn_herdr_agent(
     dry_run: bool = False,
 ) -> dict[str, Any]:
     """Start a herdr agent pane with an allowlisted CLI plan."""
-    plan = resolve_launch(cli, model, require_available=True)
-    argv = build_herdr_start_argv(name, plan, cwd=cwd)
+    # Dry-run must work in CI without the CLI binary on PATH.
+    plan = resolve_launch(cli, model, require_available=not dry_run)
+    # Keep coding-primary split congruent with tok-tua/grok-tua dual-pane (~80% left).
+    # Herdr --ratio is the fraction for the *new* pane; 0.20 ≈ right strip.
+    split_argv = [
+        "herdr",
+        "pane",
+        "split",
+        "--current",
+        "--direction",
+        "right",
+        "--ratio",
+        "0.20",
+        "--no-focus",
+    ]
+    if cwd:
+        split_argv.extend(["--cwd", cwd])
     if dry_run:
-        return {"ok": True, "dry_run": True, "argv": argv, "plan": _public_plan(plan)}
+        pane_id = "<pane-id>"
+    else:
+        split = subprocess.run(split_argv, capture_output=True, text=True, timeout=15, check=False)
+        try:
+            payload = json.loads(split.stdout)
+            pane_id = payload["result"]["pane"]["pane_id"]
+        except (ValueError, KeyError, TypeError) as exc:
+            return {
+                "ok": False,
+                "argv": split_argv,
+                "error": f"Herdr pane split failed: {exc}",
+                "stdout": split.stdout[-2000:],
+                "stderr": split.stderr[-2000:],
+                "plan": _public_plan(plan),
+            }
+    argv = build_herdr_start_argv(name, plan, cwd=cwd, pane_id=pane_id)
+    if dry_run:
+        return {
+            "ok": True,
+            "dry_run": True,
+            "argv": argv,
+            "pane_split": list(split_argv),
+            "plan": _public_plan(plan),
+        }
     try:
         proc = subprocess.run(
             argv,

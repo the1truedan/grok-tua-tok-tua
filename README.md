@@ -8,6 +8,46 @@ burn a session.
 They live in **one repo on purpose**: each imports a bit of the other. Split
 them and both break.
 
+## Multi-agent continuity (start here)
+
+Agents (and humans) should not rediscover progress by filewalking or SSH
+hammering. Use the public context-pit contract:
+
+| Doc | Role |
+|-----|------|
+| **[docs/CONTINUITY.md](docs/CONTINUITY.md)** | Routing law, anti-patterns, plan → handoff |
+| **[docs/HANDOFF_TEMPLATE.md](docs/HANDOFF_TEMPLATE.md)** | Paste-first packet after a plan turn |
+| **[docs/ORCHESTRATION.md](docs/ORCHESTRATION.md)** | single / herdr / turnstone / loop |
+| **[AGENTS.md](AGENTS.md)** | Short start checklist |
+
+```sh
+./bin/tok-tua --cli pi --model manager-code   # dual-pane ~80% left / 20% right
+./bin/grok-tua
+PYTHONPATH=. python3 -m tok_tua loop --cli pi --model manager-code   # dry-run handoff
+```
+
+Dual-pane defaults match: **coding left larger**, metrics right (`TOK_TUA_STATS_PCT=20`,
+`GROK_TUA_STATS_PCT=20`). Herdr multipane remains optional and still fragile —
+prefer `scale=single` first.
+
+## Part of a home-lab stack
+
+These launchers are a **need-born** slice of a larger private mesh (M.A.N.A.G.E.R.):
+many coding CLIs needed one safe front door and a visible spend/health pane before
+sessions burned out of control.
+
+| Piece | Public role |
+|-------|-------------|
+| **[ai-gateway](https://github.com/the1truedan/ai-gateway)** | Headroom → LiteLLM glue (the door) |
+| **This repo** | How humans/agents open the door (dual-pane CLIs) |
+| **[fast-models](https://github.com/the1truedan/fast-models)** | Storage plane for weights/caches (when used) |
+
+**CI smoke** (import + dry-run resolve) runs on GitHub Actions — production-*adjacent*
+readiness, not a full home GPU lab. Sensitive care data stays off free-cloud façades;
+private document proof lives in a separate private lab, not here.
+
+Story spine: *problem under pressure → tool → smoke receipt → scrubbed public slice*.
+
 ## What it looks like
 
 **`grok-tua`** — Grok CLI on the left, stack + quota + fleet dashboard on the right:
@@ -176,6 +216,9 @@ Both wrappers also work invoked directly as Python modules, e.g.:
 ```sh
 PYTHONPATH=. python3 -m tok_tua stack
 PYTHONPATH=. python3 -m tok_tua providers
+PYTHONPATH=. python3 -m tok_tua spawn --cli pi --dry-run
+PYTHONPATH=. python3 -m tok_tua loop --cli pi --model manager-code
+PYTHONPATH=. python3 -m tok_tua turnstone health
 PYTHONPATH=. python3 -m grok_tua.dashboard --check
 ```
 

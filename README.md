@@ -1,9 +1,15 @@
 # grok-tua / tok-tua
 
+[![Version](https://img.shields.io/badge/version-0.2.0-4ade80.svg)](CHANGELOG.md)
+[![Pages](https://img.shields.io/badge/pages-grok--tua--tok--tua-f0b429.svg)](https://the1truedan.github.io/grok-tua-tok-tua/)
+
 Two small launchers that open a coding CLI next to a live status pane (gateway
 health, rough spend, system meters). They talk to a local LLM gateway
 (Headroom → LiteLLM) so you can see whether the stack is alive before you
 burn a session.
+
+**Site:** [the1truedan.github.io/grok-tua-tok-tua](https://the1truedan.github.io/grok-tua-tok-tua/) ·
+**Release:** [`v0.2.0`](CHANGELOG.md)
 
 They live in **one repo on purpose**: each imports a bit of the other. Split
 them and both break.

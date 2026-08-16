@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>grok-tua / tok-tua</title>
+<meta name="description" content="Two launchers that open a coding CLI next to a live health and spend pane. They aim at Headroom → LiteLLM so you see the door before you burn a session." />
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<style>
+  :root {
+    --bg: #0b0f0c;
+    --bg-panel: #121812;
+    --bg-panel-2: #181f18;
+    --line: #2a362c;
+    --fg: #e8f0e8;
+    --fg-dim: #8fa396;
+    --fg-dimmer: #5d6e63;
+    --accent: #4ade80;
+    --accent-soft: #86efac;
+    --accent-mu: #f0b429;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--fg); }
+  body {
+    font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    line-height: 1.6; -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  ::selection { background: var(--accent); color: var(--bg); }
+
+  .hero { position: relative; overflow: hidden; border-bottom: 1px solid var(--line); }
+  #pane-rain { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0.5; }
+  .hero-inner {
+    position: relative; z-index: 1; max-width: 920px; margin: 0 auto;
+    padding: 5.5rem 1.5rem 4rem; text-align: center;
+  }
+  .eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem; letter-spacing: 0.22em; text-transform: uppercase;
+    color: var(--accent-soft); margin: 0 0 1.4rem;
+  }
+  .wordmark {
+    margin: 0;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-weight: 700; font-size: clamp(1.8rem, 5.5vw, 3.4rem);
+    text-shadow: 0 0 8px rgba(74,222,128,0.35), 0 0 24px rgba(240,180,41,0.18);
+  }
+  .wordmark .g { color: var(--accent); }
+  .wordmark .t { color: var(--accent-mu); }
+  .tagline {
+    max-width: 50ch; margin: 1.4rem auto 0; font-size: 1.1rem;
+    color: var(--fg-dim); text-wrap: balance;
+  }
+  .hero-cta {
+    display: flex; justify-content: center; align-items: center;
+    gap: 0.9rem; flex-wrap: wrap; margin-top: 2.4rem;
+  }
+  .btn {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.85rem; text-decoration: none; padding: 0.65rem 1.1rem;
+    border-radius: 3px; border: 1px solid var(--line);
+    background: var(--bg-panel); color: var(--fg);
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent-soft); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 600; }
+  .btn.primary:hover { background: var(--accent-soft); }
+  .version-chip {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.78rem; color: var(--fg-dimmer);
+  }
+  .version-chip b { color: var(--accent-mu); }
+
+  section.band { max-width: 980px; margin: 0 auto; padding: 4.2rem 1.5rem; }
+  .section-head { text-align: center; margin-bottom: 2.6rem; }
+  .section-eyebrow {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--fg-dimmer); margin: 0 0 0.7rem;
+  }
+  .section-title { margin: 0; font-size: 1.5rem; font-weight: 600; text-wrap: balance; }
+  .section-sub { max-width: 54ch; margin: 0.7rem auto 0; color: var(--fg-dim); }
+
+  .stack-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 1px;
+    background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden;
+  }
+  .stack-card {
+    background: var(--bg-panel); padding: 1.5rem 1.4rem; display: flex;
+    flex-direction: column; gap: 0.5rem; text-decoration: none; min-height: 148px;
+  }
+  a.stack-card:hover { background: var(--bg-panel-2); }
+  .stack-card .role {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent-soft);
+  }
+  .stack-card h3 { margin: 0; font-size: 1.08rem; }
+  .stack-card p { margin: 0; font-size: 0.9rem; color: var(--fg-dim); flex-grow: 1; }
+  .stack-card .link-hint {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.74rem; color: var(--accent-mu);
+  }
+
+  .shots { display: grid; grid-template-columns: 1fr 1fr; gap: 1.2rem; }
+  .shot {
+    background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 8px; overflow: hidden;
+  }
+  .shot img { display: block; width: 100%; height: auto; }
+  .shot figcaption {
+    padding: 0.75rem 1rem; font-size: 0.82rem; color: var(--fg-dimmer);
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  .story { max-width: 62ch; margin: 0 auto; }
+  .story p { color: var(--fg-dim); margin: 0 0 1rem; }
+  .story strong { color: var(--fg); }
+  .tl {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.78rem; color: var(--accent-soft);
+  }
+  pre {
+    background: var(--bg-panel); border: 1px solid var(--line);
+    border-radius: 6px; padding: 1rem 1.1rem; overflow-x: auto;
+    font-size: 0.82rem; color: var(--accent-soft); text-align: left;
+  }
+
+  footer { border-top: 1px solid var(--line); padding: 2.4rem 1.5rem 3rem; }
+  .footer-inner {
+    max-width: 980px; margin: 0 auto; display: flex;
+    justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem;
+  }
+  .footer-links {
+    display: flex; gap: 1.4rem;
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.8rem; color: var(--fg-dim);
+  }
+  .footer-links a { text-decoration: none; }
+  .footer-links a:hover { color: var(--accent-soft); }
+  .mu-mark {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.8rem; color: var(--fg-dimmer);
+  }
+  .mu-mark span { color: var(--accent-mu); }
+
+  @media (max-width: 720px) {
+    .stack-grid, .shots { grid-template-columns: 1fr; }
+  }
+  @media (prefers-reduced-motion: reduce) { #pane-rain { display: none; } }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <canvas id="pane-rain" aria-hidden="true"></canvas>
+  <div class="hero-inner">
+    <p class="eyebrow">dual-pane launchers · not a model runtime</p>
+    <h1 class="wordmark"><span class="g">grok-tua</span> / <span class="t">tok-tua</span></h1>
+    <p class="tagline">Open a coding CLI next to a live health and spend pane. See whether Headroom → LiteLLM is alive before you burn a session.</p>
+    <div class="hero-cta">
+      <a class="btn primary" href="https://github.com/the1truedan/grok-tua-tok-tua">View on GitHub</a>
+      <a class="btn" href="https://github.com/the1truedan/grok-tua-tok-tua/releases/tag/v0.2.0">v0.2.0</a>
+      <a class="btn" href="https://the1truedan.github.io/ai-gateway/">ai-gateway</a>
+      <span class="version-chip">v<b>0.2.0</b> · MIT · public</span>
+    </div>
+  </div>
+</div>
+
+<section class="band">
+  <div class="section-head">
+    <p class="section-eyebrow">two binaries, one repo</p>
+    <h2 class="section-title">They import each other. Split them and both break.</h2>
+    <p class="section-sub">Left pane is the agent. Right pane is the door: Headroom, LiteLLM, spend, CLI versions. Coding takes ~80%. Meters take ~20%.</p>
+  </div>
+  <div class="stack-grid">
+    <a class="stack-card" href="https://github.com/the1truedan/grok-tua-tok-tua">
+      <span class="role">grok pane</span>
+      <h3>grok-tua</h3>
+      <p>Grok CLI on the left. Stack, quota, fleet CPU/RAM/GPU, and the active session’s burn on the right.</p>
+      <span class="link-hint">./bin/grok-tua →</span>
+    </a>
+    <a class="stack-card" href="https://github.com/the1truedan/grok-tua-tok-tua">
+      <span class="role">any CLI</span>
+      <h3>tok-tua</h3>
+      <p>Pi, OpenCode, Claude Code, Codex, Cursor — same dual-pane. Launch already aimed at Headroom.</p>
+      <span class="link-hint">./bin/tok-tua --cli pi →</span>
+    </a>
+    <a class="stack-card" href="https://the1truedan.github.io/ai-gateway/">
+      <span class="role">the door</span>
+      <h3>ai-gateway</h3>
+      <p>Headroom → LiteLLM glue these launchers assume. They do not route tokens. They show whether the bus is up.</p>
+      <span class="link-hint">the1truedan.github.io/ai-gateway →</span>
+    </a>
+    <a class="stack-card" href="https://the1truedan.github.io/fast-models/">
+      <span class="role">the house</span>
+      <h3>fast-models</h3>
+      <p>Shared weights and caches. A launcher without a pool is a dashboard with nowhere to work.</p>
+      <span class="link-hint">the1truedan.github.io/fast-models →</span>
+    </a>
+    <a class="stack-card" href="https://github.com/chopratejas/headroom" target="_blank" rel="noopener">
+      <span class="role">thrift</span>
+      <h3>Headroom</h3>
+      <p>Default front door the pane pings first. Compresses context so a long agent session does not dump a novel into a paid model.</p>
+      <span class="link-hint">github.com/chopratejas/headroom →</span>
+    </a>
+    <a class="stack-card" href="https://github.com/BerriAI/litellm" target="_blank" rel="noopener">
+      <span class="role">spend</span>
+      <h3>LiteLLM</h3>
+      <p>The metered source of truth in the pane: <code>today=</code> and <code>window=</code> dollars, plus which worker alias is live.</p>
+      <span class="link-hint">github.com/BerriAI/litellm →</span>
+    </a>
+  </div>
+</section>
+
+<section class="band">
+  <div class="section-head">
+    <p class="section-eyebrow">what it looks like</p>
+    <h2 class="section-title">Real sessions. One LAN address blacked out.</h2>
+  </div>
+  <div class="shots">
+    <figure class="shot">
+      <img src="assets/groktua-tui.png" alt="grok-tua dual-pane: Grok CLI left, stack and spend right" />
+      <figcaption>grok-tua — Grok CLI + fleet dashboard</figcaption>
+    </figure>
+    <figure class="shot">
+      <img src="assets/toktua-tui.png" alt="tok-tua dual-pane: OpenCode left, gateway and credits right" />
+      <figcaption>tok-tua — OpenCode + gateway / credits</figcaption>
+    </figure>
+  </div>
+</section>
+
+<section class="band">
+  <div class="section-head">
+    <p class="section-eyebrow">try it</p>
+    <h2 class="section-title">Defaults to localhost. Nothing phones a stranger’s machine.</h2>
+  </div>
+<pre>git clone https://github.com/the1truedan/grok-tua-tok-tua
+cd grok-tua-tok-tua
+./bin/tok-tua --cli pi --model manager-code
+./bin/grok-tua</pre>
+</section>
+
+<section class="band">
+  <div class="section-head">
+    <p class="section-eyebrow">how it came to be</p>
+    <h2 class="section-title">The door worked. Starting work was the bottleneck.</h2>
+  </div>
+  <div class="story">
+    <p>Once the local gateway was up, the daily question became: which CLI, which model tier, is Headroom alive, am I about to burn cloud credit by mistake?</p>
+    <p><strong>grok-tua</strong> and <strong>tok-tua</strong> grew out of caregiver-hours shipping: cloud models helping sketch routing and smoke checks, the local repo holding the real scripts. They were extracted from the monorepo so the launchers could version on their own.</p>
+    <p><span class="tl">July 2026</span> — monorepo tooling (v0.2 era). <span class="tl">Late July / early August 2026</span> — public extract. They live in one repo on purpose: each imports a bit of the other.</p>
+    <p>They are how humans and agents open the <a href="https://the1truedan.github.io/ai-gateway/">ai-gateway</a> door. They are not the door.</p>
+  </div>
+</section>
+
+<footer>
+  <div class="footer-inner">
+    <span class="mu-mark">left pane codes · right pane watches the <span>µ</span>lab</span>
+    <nav class="footer-links">
+      <a href="https://github.com/the1truedan/grok-tua-tok-tua/blob/main/README.md">README</a>
+      <a href="https://github.com/the1truedan/grok-tua-tok-tua/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/the1truedan/grok-tua-tok-tua/blob/main/LICENSE">MIT</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(function () {
+  var canvas = document.getElementById('pane-rain');
+  if (!canvas || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  var ctx = canvas.getContext('2d');
+  var hero = canvas.parentElement;
+  var left = [], right = [];
+  function size() {
+    var r = hero.getBoundingClientRect();
+    canvas.width = r.width; canvas.height = r.height;
+    left = []; right = [];
+    var n = Math.max(18, Math.floor(r.width / 50));
+    for (var i = 0; i < n; i++) {
+      left.push({ x: Math.random() * r.width * 0.62, y: Math.random() * r.height, v: 0.7 + Math.random() });
+      right.push({ x: r.width * 0.68 + Math.random() * r.width * 0.3, y: Math.random() * r.height, v: 0.5 + Math.random() * 0.8 });
+    }
+  }
+  size();
+  window.addEventListener('resize', size);
+  function frame() {
+    var w = canvas.width, h = canvas.height, split = w * 0.66;
+    ctx.fillStyle = 'rgba(11,15,12,0.2)';
+    ctx.fillRect(0, 0, w, h);
+    ctx.strokeStyle = 'rgba(240,180,41,0.18)';
+    ctx.beginPath(); ctx.moveTo(split, 16); ctx.lineTo(split, h - 16); ctx.stroke();
+    var i;
+    ctx.fillStyle = 'rgba(74,222,128,0.4)';
+    for (i = 0; i < left.length; i++) {
+      var d = left[i]; d.y += d.v; if (d.y > h) { d.y = -6; d.x = Math.random() * split * 0.95; }
+      ctx.fillRect(d.x, d.y, 2, 6);
+    }
+    ctx.fillStyle = 'rgba(240,180,41,0.55)';
+    for (i = 0; i < right.length; i++) {
+      var e = right[i]; e.y += e.v; if (e.y > h) { e.y = -4; e.x = split + 12 + Math.random() * (w - split - 20); }
+      ctx.fillRect(e.x, e.y, 3, 3);
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>

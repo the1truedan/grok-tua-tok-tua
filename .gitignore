@@ -8,3 +8,5 @@ logs/
 **/.DS_Store
 docs/handoffs/SESSION_HANDOFF_*.md
 !docs/handoffs/.gitkeep
+.pmb/
+.mcp.json

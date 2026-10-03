@@ -3,6 +3,13 @@
 All notable changes to **grok-tua / tok-tua** are documented here.
 Format inspired by [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.2.1] — 2026-10-02
+
+### Changed
+
+- README, site and repository description rewritten in ASD-STE100 style (Simplified Technical English):
+  short sentences, active voice, no idioms ("burn a session", "see the door"), one term for one thing.
+
 ## [0.2.0] — 2026-08-16
 
 ### Added
